@@ -1,0 +1,24 @@
+# Secrets — NUNCA comitar
+.streamlit/secrets.toml
+
+# Cache de dados (gerado em runtime ou sincronizado manualmente)
+cache_certificados/*.json
+cache_certificados/*.xlsx
+cache_certificados/*.parquet
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
