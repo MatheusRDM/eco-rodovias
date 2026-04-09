@@ -17,7 +17,7 @@ if _ROOT not in sys.path: sys.path.insert(0, _ROOT)
 if _ECO  not in sys.path: sys.path.insert(0, _ECO)
 
 from styles import aplicar_estilos
-from page_auth import proteger_pagina
+from auth import verificar_autenticacao, mostrar_tela_login, fazer_logout
 
 # =============================================================================
 st.set_page_config(
@@ -27,7 +27,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 aplicar_estilos()
-proteger_pagina("Eco Rodovias")
+
+# ── Autenticação ──────────────────────────────────────────────────────────────
+if not verificar_autenticacao():
+    mostrar_tela_login()
+    st.stop()
 # =============================================================================
 
 st.markdown("""
@@ -247,6 +251,15 @@ def _sidebar():
             🛣️ BR-365 — Eco Cerrado<br>
             <span style="color:#8FA882; font-size:0.72rem">Supervisão de Obras</span>
         </div>""", unsafe_allow_html=True)
+
+        st.markdown("---")
+        usuario = st.session_state.get("usuario", "")
+        st.markdown(
+            f"<span style='font-size:0.82rem;color:#BFCF99;'>👤 {usuario}</span>",
+            unsafe_allow_html=True,
+        )
+        if st.button("SAIR", use_container_width=True, key="logout_main"):
+            fazer_logout()
 
         st.markdown("---")
         st.markdown('<div class="eco-sidebar-title">Acesso ao Servidor</div>', unsafe_allow_html=True)
