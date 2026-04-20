@@ -15,6 +15,7 @@ if _ROOT_DIR  not in sys.path: sys.path.insert(0, _ROOT_DIR)
 import streamlit as st
 from _eco_shared import _CACHE_DIR, AEVIAS_BASE_URL
 from _eco_funcoes import cargo_para_grupo, header_grupo, ORDEM_GRUPOS, GRUPOS
+from _base44_api import listar as _b44_listar
 
 _ENSAIOS_PATH = os.path.join(_CACHE_DIR, "ensaios_aevias.json")
 _BASE44_URL   = AEVIAS_BASE_URL
@@ -92,9 +93,37 @@ _CSS_TABELA = """
 # UTILITÁRIOS E DADOS
 # =============================================================================
 
-@st.cache_data(ttl=60, show_spinner=False)
 def _carregar_diarios() -> list:
-    if not os.path.exists(_ENSAIOS_PATH): return []
+    """Carrega Diários de Obra via API Base44 (TTL 5 min), fallback JSON."""
+    # 1. API Base44 direta
+    recs_b44 = _b44_listar("DiarioObra")
+    if recs_b44:
+        result = []
+        for r in recs_b44:
+            raw_data = r.get("data") or r.get("created_date", "")
+            try:
+                data_fmt = datetime.fromisoformat(str(raw_data)[:10]).strftime("%d/%m/%Y")
+            except Exception:
+                data_fmt = str(raw_data)[:10]
+            status = ("Reprovado" if r.get("was_rejected")
+                      else "Aprovado" if r.get("approved")
+                      else "Pendente")
+            result.append({
+                "tipo":        "Diário de Obra",
+                "profissional": r.get("laboratorista_name", "—"),
+                "lab":          r.get("laboratorista_name", "—"),
+                "data":         data_fmt,
+                "status":       status,
+                "reportUrl":    f"/diario-de-obra/{r.get('id','')}",
+                "rodovia":      r.get("rodovia", ""),
+                "trecho":       r.get("trecho", ""),
+                "atividades":   r.get("atividades_realizadas", ""),
+                "id":           r.get("id", ""),
+            })
+        return result
+    # 2. Fallback: JSON local/cache
+    if not os.path.exists(_ENSAIOS_PATH):
+        return []
     with open(_ENSAIOS_PATH, encoding="utf-8") as f:
         dados = json.load(f)
     recs = dados if isinstance(dados, list) else dados.get("registros", dados.get("data", []))

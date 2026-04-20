@@ -18,10 +18,52 @@ from _eco_shared import (
     AEVIAS_BASE_URL,
 )
 from _eco_funcoes import cargo_para_grupo, header_grupo, ORDEM_GRUPOS, GRUPOS
+from _base44_api import listar as _b44_listar
 
 # =============================================================================
 # CARREGAMENTO E UTILITÁRIOS
 # =============================================================================
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _carregar_checklist_api() -> list[dict]:
+    """
+    Carrega todos os tipos de checklist da API Base44.
+    Retorna lista normalizada: {data, laboratorista_name, tipo, status, id}
+    """
+    entidades = [
+        ("ChecklistUsina",         "Checklist de Usina"),
+        ("ChecklistAplicacao",     "Checklist de Aplicação"),
+        ("ChecklistMRAF",          "Checklist de MRAF"),
+        ("ChecklistTerraplanagem", "Checklist Terraplanagem"),
+        ("ChecklistConcretagem",   "Checklist Concretagem"),
+        ("ChecklistReciclagem",    "Checklist Reciclagem"),
+    ]
+    resultado = []
+    for entidade, tipo_nome in entidades:
+        recs = _b44_listar(entidade)
+        for r in recs:
+            raw = r.get("data") or r.get("created_date", "")
+            try:
+                data_fmt = datetime.fromisoformat(str(raw)[:10]).strftime("%d/%m/%Y")
+                data_iso = datetime.fromisoformat(str(raw)[:10]).strftime("%Y-%m-%d")
+            except Exception:
+                data_fmt = str(raw)[:10]
+                data_iso = str(raw)[:10]
+            status = ("Reprovado" if r.get("was_rejected")
+                      else "Aprovado" if r.get("approved")
+                      else "Pendente")
+            resultado.append({
+                "tipo":               tipo_nome,
+                "lab":                r.get("laboratorista_name", "—"),
+                "profissional":       r.get("laboratorista_name", "—"),
+                "data":               data_fmt,
+                "data_iso":           data_iso,
+                "status":             status,
+                "id":                 r.get("id", ""),
+                "entidade":           entidade,
+            })
+    return resultado
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _carregar_checklist_cache() -> dict:
@@ -221,32 +263,175 @@ def _renderizar_calendario(people: list[dict], mes_ref: str, aevias_por_grp: dic
 # MAIN ABA CHECKLIST
 # =============================================================================
 
+_COR_TIPO_CK = {
+    "Checklist de Usina":    "#4CC9F0",
+    "Checklist de Aplicação":"#F7B731",
+    "Checklist de MRAF":     "#FF6B6B",
+    "Checklist Terraplanagem":"#7BBF6A",
+    "Checklist Concretagem": "#A29BFE",
+    "Checklist Reciclagem":  "#FD79A8",
+}
+
+
+def _renderizar_checklist_api(registros: list[dict]):
+    """Renderiza calendário de checklists diretamente dos dados da API Base44."""
+    import pandas as pd
+    from datetime import date as _date
+
+    if not registros:
+        st.info("Sem dados de checklist na API."); return
+
+    df = pd.DataFrame(registros)
+    df["data_dt"] = pd.to_datetime(df["data_iso"], errors="coerce")
+    df = df.dropna(subset=["data_dt"]).sort_values("data_dt")
+
+    today = _date.today()
+    today_str = today.strftime("%Y-%m-%d")
+
+    # ── Filtro de mês ──────────────────────────────────────────────────────────
+    meses = df["data_dt"].dt.to_period("M").drop_duplicates().sort_values(ascending=False)
+    _PT = {1:"Jan",2:"Fev",3:"Mar",4:"Abr",5:"Mai",6:"Jun",
+           7:"Jul",8:"Ago",9:"Set",10:"Out",11:"Nov",12:"Dez"}
+    opcoes = {f"{_PT[p.month]}/{p.year}": p for p in meses}
+    c1, c2 = st.columns([3, 3])
+    with c1:
+        mes_lbl = st.selectbox("Mês:", list(opcoes.keys()), key="ck_api_mes")
+    per = opcoes[mes_lbl]
+    d_ini = per.to_timestamp().date()
+    d_fim = ((per + 1).to_timestamp() - pd.Timedelta(days=1)).date()
+    df_mes = df[(df["data_dt"].dt.date >= d_ini) & (df["data_dt"].dt.date <= d_fim)]
+
+    with c2:
+        tipos_disp = sorted(df_mes["tipo"].unique().tolist())
+        tipo_sel = st.multiselect("Tipo:", tipos_disp, default=tipos_disp, key="ck_api_tipo")
+    if tipo_sel:
+        df_mes = df_mes[df_mes["tipo"].isin(tipo_sel)]
+
+    if df_mes.empty:
+        st.info("Sem registros no período selecionado."); return
+
+    # ── Resumo KPI ─────────────────────────────────────────────────────────────
+    total    = len(df_mes)
+    aprovado = (df_mes["status"] == "Aprovado").sum()
+    pendente = (df_mes["status"] == "Pendente").sum()
+    labs     = df_mes["lab"].nunique()
+    st.markdown(f"""
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 18px 0">
+      <div style="flex:1;min-width:100px;background:rgba(76,201,240,0.12);border:1px solid #4CC9F055;
+                  border-radius:10px;padding:12px;text-align:center">
+        <div style="font-size:1.6rem;font-weight:700;color:#4CC9F0">{total}</div>
+        <div style="color:#C8D8A8;font-size:.72rem">Total checklists</div></div>
+      <div style="flex:1;min-width:100px;background:rgba(60,180,75,0.12);border:1px solid #3cb44b55;
+                  border-radius:10px;padding:12px;text-align:center">
+        <div style="font-size:1.6rem;font-weight:700;color:#3cb44b">{aprovado}</div>
+        <div style="color:#C8D8A8;font-size:.72rem">Aprovados</div></div>
+      <div style="flex:1;min-width:100px;background:rgba(230,25,75,0.12);border:1px solid #FF557755;
+                  border-radius:10px;padding:12px;text-align:center">
+        <div style="font-size:1.6rem;font-weight:700;color:#ff5577">{pendente}</div>
+        <div style="color:#C8D8A8;font-size:.72rem">Pendentes</div></div>
+      <div style="flex:1;min-width:100px;background:rgba(162,155,254,0.12);border:1px solid #A29BFE55;
+                  border-radius:10px;padding:12px;text-align:center">
+        <div style="font-size:1.6rem;font-weight:700;color:#A29BFE">{labs}</div>
+        <div style="color:#C8D8A8;font-size:.72rem">Laboratoristas</div></div>
+    </div>""", unsafe_allow_html=True)
+
+    # ── Tabela agrupada por laboratorista ──────────────────────────────────────
+    datas = sorted(df_mes["data_iso"].unique())
+    _DAY_ABBR = {0:"SEG",1:"TER",2:"QUA",3:"QUI",4:"SEX",5:"SÁB",6:"DOM"}
+
+    html = ['<div style="overflow-x:auto"><table style="border-collapse:collapse;font-family:Inter,sans-serif;font-size:.68rem;width:100%;min-width:700px">']
+    html.append('<thead><tr><th style="background:rgba(86,110,61,.2);color:#BFCF99;padding:6px 8px;text-align:left;border:1px solid rgba(86,110,61,.15);white-space:nowrap">Laboratorista</th>')
+    for d in datas:
+        dt = datetime.strptime(d, "%Y-%m-%d")
+        is_hj = (d == today_str)
+        sty = "color:#F7B731;font-weight:700" if is_hj else ""
+        lbl = "HOJE" if is_hj else f"{dt.day:02d}"
+        sub = _DAY_ABBR[dt.weekday()]
+        html.append(f'<th style="background:rgba(86,110,61,.2);color:#BFCF99;padding:5px 3px;text-align:center;border:1px solid rgba(86,110,61,.15);font-size:.58rem;{sty}">{lbl}<br>{sub}</th>')
+    html.append('<th style="background:rgba(86,110,61,.2);color:#BFCF99;padding:5px;text-align:center;border:1px solid rgba(86,110,61,.15)">Total</th></tr></thead><tbody>')
+
+    AEVIAS = "https://aevias-controle.base44.app"
+    labs_ord = sorted(df_mes["lab"].unique())
+    for lab in labs_ord:
+        df_lab = df_mes[df_mes["lab"] == lab]
+        total_lab = len(df_lab)
+        html.append(f'<tr><td style="font-weight:600;color:#E8EFD8;padding:5px 10px;border:1px solid rgba(255,255,255,.05);min-width:160px">{lab}</td>')
+        for d in datas:
+            is_hj = (d == today_str)
+            hj = " outline:2px solid #F7B731;outline-offset:-1px;" if is_hj else ""
+            recs_dia = df_lab[df_lab["data_iso"] == d]
+            if recs_dia.empty:
+                html.append(f'<td style="color:#3a4a5e;text-align:center;border:1px solid rgba(255,255,255,.05);{hj}">—</td>')
+            else:
+                n = len(recs_dia)
+                # Pior status
+                sts = recs_dia["status"].tolist()
+                if "Reprovado" in sts: bg, clr = "rgba(230,25,75,.25)", "#e6194b"
+                elif "Pendente" in sts: bg, clr = "rgba(230,25,75,.15)", "#ff5577"
+                else: bg, clr = "rgba(60,180,75,.2)", "#3cb44b"
+                tipos_dia = " | ".join(recs_dia["tipo"].unique())
+                rec0 = recs_dia.iloc[0]
+                url = f"{AEVIAS}/{rec0['entidade']}/{rec0['id']}"
+                lbl_n = str(n) if n > 1 else ("OK" if sts[0]=="Aprovado" else "PND")
+                html.append(f'<td style="background:{bg};color:{clr};font-weight:700;text-align:center;border:1px solid rgba(255,255,255,.05);{hj}" title="{tipos_dia}"><a href="{url}" target="_blank" style="color:inherit;text-decoration:none">{lbl_n}</a></td>')
+        html.append(f'<td style="color:#8FA882;font-weight:600;text-align:center;border:1px solid rgba(255,255,255,.05)">{total_lab}</td></tr>')
+
+    html.append('</tbody></table></div>')
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+    # ── Por tipo de checklist ─────────────────────────────────────────────────
+    st.markdown("### Por tipo de Checklist")
+    tipo_cnt = df_mes.groupby("tipo").size().reset_index(name="qtd").sort_values("qtd", ascending=False)
+    for _, row in tipo_cnt.iterrows():
+        cor = _COR_TIPO_CK.get(row["tipo"], "#888")
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
+            f'<div style="width:10px;height:10px;border-radius:50%;background:{cor}"></div>'
+            f'<span style="color:#E8EFD8;font-size:.85rem">{row["tipo"]}</span>'
+            f'<span style="color:{cor};font-weight:700;font-size:.9rem">{row["qtd"]}</span>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+
 def _aba_checklist():
     try:
         st.image("Imagens/AE - Logo Hor Principal_2.png", width=220)
     except:
         pass
 
-    st.markdown('<div class="rs-header"><h2>Controle de Checklist APP</h2><p>Acompanhamento diário de envio de checklists via aplicativo</p></div>', unsafe_allow_html=True)
-    
-    # Carga de dados (Checklist + Ensaios para links)
-    cache = _carregar_checklist_cache(); meds = sorted(cache.keys(), reverse=True)
-    if not meds:
-        st.info("Nenhum dado de checklist encontrado no cache."); return
-    
-    med_sel = st.selectbox("Medição:", meds, key="ck_med_sel")
-    data_med = cache[med_sel]; all_people = []
-    for sheet_people in data_med.get("sheets", {}).values(): all_people.extend(sheet_people)
-    
-    # Carrega ensaios para cruzar links
-    from _eco_resumo import _carregar_ensaios_resumo
-    ensaios_raw = _carregar_ensaios_resumo()
-    aevias_por_grp = defaultdict(lambda: defaultdict(list))
-    for e in ensaios_raw:
-        if "checklist" in str(e.get("tipo","")).lower():
-            prof = (e.get("lab") or e.get("profissional") or "").strip()
-            try: e["_dstr"] = datetime.strptime(e["data"].split()[0], "%d/%m/%Y").strftime("%Y-%m-%d")
-            except: e["_dstr"] = ""
-            if prof: aevias_por_grp[cargo_para_grupo(e.get("funcao",""))][prof].append(e)
+    c_h, c_btn = st.columns([6,1])
+    with c_h:
+        st.markdown('<div class="rs-header"><h2>Controle de Checklist APP</h2><p>Dados em tempo real — API Base44</p></div>', unsafe_allow_html=True)
+    with c_btn:
+        st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
+        if st.button("↺", key="ck_atualizar", help="Atualizar dados"):
+            st.cache_data.clear(); st.rerun()
 
-    _renderizar_calendario(all_people, med_sel, aevias_por_grp=aevias_por_grp)
+    # ── Carrega dados da API Base44 ────────────────────────────────────────────
+    with st.spinner("Carregando checklists..."):
+        ck_api = _carregar_checklist_api()
+
+    if ck_api:
+        # Renderiza calendário direto da API
+        _renderizar_checklist_api(ck_api)
+    else:
+        # Fallback: cache JSON antigo
+        cache = _carregar_checklist_cache(); meds = sorted(cache.keys(), reverse=True)
+        if not meds:
+            st.warning("Nenhum dado de checklist encontrado (API + cache)."); return
+
+        med_sel = st.selectbox("Medição:", meds, key="ck_med_sel")
+        data_med = cache[med_sel]; all_people = []
+        for sheet_people in data_med.get("sheets", {}).values(): all_people.extend(sheet_people)
+
+        from _eco_resumo import _carregar_ensaios_resumo
+        ensaios_raw = _carregar_ensaios_resumo()
+        aevias_por_grp = defaultdict(lambda: defaultdict(list))
+        for e in ensaios_raw:
+            if "checklist" in str(e.get("tipo","")).lower():
+                prof = (e.get("lab") or e.get("profissional") or "").strip()
+                try: e["_dstr"] = datetime.strptime(e["data"].split()[0], "%d/%m/%Y").strftime("%Y-%m-%d")
+                except: e["_dstr"] = ""
+                if prof: aevias_por_grp[cargo_para_grupo(e.get("funcao",""))][prof].append(e)
+        _renderizar_calendario(all_people, med_sel, aevias_por_grp=aevias_por_grp)

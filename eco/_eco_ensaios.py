@@ -1,13 +1,10 @@
 """
-_eco_ensaios.py — Ensaios AEVIAS: analytics completo com fonte de dados própria.
+_eco_ensaios.py — Ensaios AEVIAS: analytics completo.
 
-FONTE DE DADOS:
-  1. Primária  : cache_certificados/ensaios_aevias.json  (sempre disponível, atualizado via sync)
-  2. Secundária: ~/Desktop/Ensaios AEVIAS/ensaios_dados.json (máquina local)
-  Ambas são geradas por:  Ensaios AEVIAS/baixar_ensaios.py  (Selenium → AEVIAS CONTROLE)
-
-SINCRONIZAR: botão "Sincronizar" executa baixar_ensaios.py e atualiza o cache JSON
-             (funciona apenas na máquina local onde o Python + Chrome estão instalados)
+FONTE DE DADOS (ordem de prioridade):
+  1. API Base44 direta (sempre disponível, TTL 5 min) — _base44_api.listar()
+  2. JSON do desktop (máquina local, fallback)
+  3. JSON do cache do app (cloud, fallback final)
 """
 import sys, os, json, subprocess, shutil
 from datetime import datetime, date, timedelta
@@ -29,6 +26,7 @@ from _eco_shared import (
 )
 from _eco_funcoes import cargo_para_grupo, header_grupo, ORDEM_GRUPOS, GRUPOS, badge_grupo
 from _eco_bg_loader import start_bg_task, is_loading, render_atualizar_btn
+from _base44_api import listar as _b44_listar, token_info as _b44_token_info
 
 # =============================================================================
 # CONSTANTES
@@ -80,7 +78,128 @@ _BASE = dict(
 _NI = dict(displayModeBar=False, scrollZoom=False)
 
 # =============================================================================
-# CARGA DE DADOS — FONTE PRÓPRIA
+# CARGA DE DADOS — API BASE44 DIRETA
+# =============================================================================
+
+# Mapeamento entidade → nome amigável do tipo
+_ENTIDADE_TIPO = {
+    "DiarioObra":                "Diário de Obra",
+    "EnsaioCAUQ":                "Ensaio de CAUQ",
+    "ChecklistUsina":            "Checklist de Usina",
+    "ChecklistAplicacao":        "Checklist de Aplicação",
+    "ChecklistMRAF":             "Checklist de MRAF",
+    "ChecklistTerraplanagem":    "Checklist Terraplanagem",
+    "ChecklistConcretagem":      "Checklist Concretagem",
+    "ChecklistReciclagem":       "Checklist Reciclagem",
+    "AcompanhamentoUsinagem":    "Acompanhamento Usinagem",
+    "AcompanhamentoCarga":       "Acompanhamento Carga",
+    "EnsaioDensidadeInSitu":     "Ensaio Densidade In Situ",
+    "EnsaioGranulometriaIndividual": "Ensaio Granulometria",
+    "EnsaioManchaPendulo":       "Ensaio Mancha/Pêndulo",
+    "EnsaioVigaBenkelman":       "Ensaio Viga Benkelman",
+    "EnsaioProctor":             "Ensaio Proctor",
+    "EnsaioTaxaMRAF":            "Ensaio Taxa MRAF",
+    "EnsaioTaxaPinturaImprimacao": "Ensaio Taxa Pintura",
+    "EnsaioSondagem":            "Ensaio Sondagem",
+}
+
+# Mapeamento entidade → categoria de obra
+_ENTIDADE_OBRA = {
+    "DiarioObra":                "Pavimento",
+    "EnsaioCAUQ":                "Pavimento",
+    "ChecklistUsina":            "Pavimento",
+    "ChecklistAplicacao":        "Pavimento",
+    "ChecklistMRAF":             "Pavimento",
+    "ChecklistTerraplanagem":    "OAE / Terraplenos",
+    "ChecklistConcretagem":      "OAE / Terraplenos",
+    "ChecklistReciclagem":       "Pavimento",
+    "AcompanhamentoUsinagem":    "Pavimento",
+    "AcompanhamentoCarga":       "Pavimento",
+    "EnsaioDensidadeInSitu":     "Pavimento",
+    "EnsaioGranulometriaIndividual": "Pavimento",
+    "EnsaioManchaPendulo":       "Pavimento",
+    "EnsaioVigaBenkelman":       "Pavimento",
+    "EnsaioProctor":             "OAE / Terraplenos",
+    "EnsaioTaxaMRAF":            "Pavimento",
+    "EnsaioTaxaPinturaImprimacao": "Pavimento",
+    "EnsaioSondagem":            "OAE / Terraplenos",
+}
+
+# URL do app para abrir cada entidade
+_AEVIAS_APP = "https://aevias-controle.base44.app"
+_ENTIDADE_PATH = {
+    "DiarioObra":             "/diario-de-obra",
+    "EnsaioCAUQ":             "/ensaio-cauq",
+    "ChecklistUsina":         "/checklist",
+    "ChecklistAplicacao":     "/checklist-aplicacao",
+    "ChecklistMRAF":          "/checklist-mraf",
+    "ChecklistTerraplanagem": "/checklist-terraplanagem",
+    "ChecklistConcretagem":   "/checklist-concretagem",
+    "ChecklistReciclagem":    "/checklist-reciclagem",
+    "AcompanhamentoUsinagem": "/acompanhamento-usinagem",
+    "AcompanhamentoCarga":    "/acompanhamento-carga",
+    "EnsaioDensidadeInSitu":  "/ensaio-densidade",
+    "EnsaioGranulometriaIndividual": "/ensaio-granulometria",
+    "EnsaioManchaPendulo":    "/ensaio-mancha-pendulo",
+    "EnsaioVigaBenkelman":    "/ensaio-viga-benkelman",
+    "EnsaioProctor":          "/EnsaioProctor",
+    "EnsaioTaxaMRAF":         "/ensaio-taxa-mraf",
+    "EnsaioTaxaPinturaImprimacao": "/ensaio-taxa-pintura",
+    "EnsaioSondagem":         "/ensaio-sondagem",
+}
+
+
+def _status_b44(rec: dict) -> str:
+    """Converte flags Base44 em label de status."""
+    if rec.get("was_rejected"):
+        return "Reprovado"
+    if rec.get("approved"):
+        return "Aprovado"
+    return "Pendente"
+
+
+def _data_b44(rec: dict) -> str:
+    """Extrai data ISO do registro e converte para dd/mm/yyyy."""
+    raw = rec.get("data") or rec.get("data_ensaio") or rec.get("created_date", "")
+    try:
+        d = datetime.fromisoformat(str(raw)[:10])
+        return d.strftime("%d/%m/%Y")
+    except Exception:
+        return str(raw)[:10]
+
+
+def _normalizar_registro(entidade: str, rec: dict) -> dict:
+    """Converte um registro Base44 para o formato esperado por _df_ensaios."""
+    rec_id   = rec.get("id", "")
+    path     = _ENTIDADE_PATH.get(entidade, f"/{entidade}")
+    report_url = f"{path}/{rec_id}" if rec_id else path
+    return {
+        "obra":       _ENTIDADE_OBRA.get(entidade, "Pavimento"),
+        "tipo":       _ENTIDADE_TIPO.get(entidade, entidade),
+        "lab":        rec.get("laboratorista_name") or rec.get("created_by", {}).get("full_name", "—"),
+        "profissional": rec.get("laboratorista_name") or rec.get("created_by", {}).get("full_name", "—"),
+        "data":       _data_b44(rec),
+        "reportUrl":  report_url,
+        "status":     _status_b44(rec),
+        "id":         rec_id,
+    }
+
+
+def _carregar_ensaios_api() -> list[dict]:
+    """
+    Busca todos os tipos de registro diretamente da API Base44.
+    Retorna lista normalizada no mesmo formato do scraper antigo.
+    """
+    resultado = []
+    for entidade in _ENTIDADE_TIPO.keys():
+        registros = _b44_listar(entidade)
+        for rec in registros:
+            resultado.append(_normalizar_registro(entidade, rec))
+    return resultado
+
+
+# =============================================================================
+# CARGA DE DADOS — FALLBACK JSON (local/cache)
 # =============================================================================
 
 def _carregar_ensaios(forcar_cache: bool = False) -> list[dict]:
@@ -681,106 +800,37 @@ def _aba_ensaios():
     except:
         pass
 
-    # ── Auto-sync: dispara ao abrir a aba se cache desatualizado (> 30 min) ──────
-    _TTL_SYNC_SEGUNDOS = 1800  # 30 minutos
-    _hoje = date.today()
-    _ini_def = _hoje.replace(day=1).strftime("%d/%m/%Y")
-    _fim_def = _hoje.strftime("%d/%m/%Y")
-
-    if not _IS_CLOUD:
-        _cache_idade = None
-        if os.path.exists(_JSON_CACHE):
-            import time as _time
-            _cache_idade = _time.time() - os.path.getmtime(_JSON_CACHE)
-
-        _precisa_sync = (
-            _cache_idade is None                        # nunca sincronizou
-            or _cache_idade > _TTL_SYNC_SEGUNDOS        # cache velho
-        )
-        if _precisa_sync and not is_loading("ensaios"):
-            _data_ini = st.session_state.get("ens_sync_ini", _ini_def)
-            _data_fim = st.session_state.get("ens_sync_fim", _fim_def)
-            start_bg_task("ensaios", _sincronizar_playwright, _data_ini, _data_fim)
-
-    # ── Cabeçalho + botão manual ───────────────────────────────────────────────
+    # ── Cabeçalho + botão Atualizar ───────────────────────────────────────────
     c_titulo, c_btn = st.columns([6, 1])
     with c_titulo:
         st.markdown("## Ensaios AEVIAS — Dashboard de Produção")
-
-        _mtime = ""
-        if os.path.exists(_JSON_CACHE):
-            _t = os.path.getmtime(_JSON_CACHE)
-            _mtime = datetime.fromtimestamp(_t).strftime("%d/%m %H:%M")
-
-        if is_loading("ensaios"):
-            st.caption("⏳ Buscando dados atualizados do AEVIAS CONTROLE...")
-        elif _mtime:
-            st.caption(f"Última atualização: {_mtime} · dados direto de [aevias-controle.base44.app]({_AEVIAS_BASE})")
+        _ti = _b44_token_info()
+        if _ti.get("expirado"):
+            st.warning("⚠️ Token Base44 expirado. Atualize `base44_token` nos secrets do Streamlit Cloud.")
         else:
-            st.caption(f"Dados direto de [aevias-controle.base44.app]({_AEVIAS_BASE})")
+            st.caption(
+                f"⚡ Dados em tempo real via API Base44 · "
+                f"[aevias-controle.base44.app]({_AEVIAS_BASE}) · "
+                f"Token válido por {_ti.get('dias_restantes', '?')} dias"
+            )
 
     with c_btn:
         st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-        if not _IS_CLOUD:
-            if render_atualizar_btn("↺ Atualizar", "ensaios",
-                                    use_container_width=True,
-                                    help="Busca dados atualizados agora (Playwright)"):
-                _data_ini = st.session_state.get("ens_sync_ini", _ini_def)
-                _data_fim = st.session_state.get("ens_sync_fim", _fim_def)
-                start_bg_task("ensaios", _sincronizar_playwright, _data_ini, _data_fim)
-                st.rerun()
-        else:
-            st.button("↺ Atualizar", key="ens_sync_cloud", use_container_width=True,
-                      disabled=True, help="Sincronização indisponível no cloud")
-
-    # Seletor de período para sincronização (apenas local)
-    if not _IS_CLOUD:
-        with st.expander("Período de sincronização", expanded=False):
-            _sc1, _sc2 = st.columns(2)
-            with _sc1:
-                _s_ini = st.date_input(
-                    "De:", value=_hoje.replace(day=1),
-                    key="ens_sync_ini_dt", format="DD/MM/YYYY",
-                )
-            with _sc2:
-                _s_fim = st.date_input(
-                    "Até:", value=_hoje,
-                    key="ens_sync_fim_dt", format="DD/MM/YYYY",
-                )
-            st.session_state["ens_sync_ini"] = _s_ini.strftime("%d/%m/%Y")
-            st.session_state["ens_sync_fim"] = _s_fim.strftime("%d/%m/%Y")
-            st.caption("Padrão: mês corrente. Períodos menores são mais rápidos.")
-
-    # Resultado da última sincronização (background task)
-    from _eco_bg_loader import has_result, has_error, pop_result, pop_error
-    if has_result("ensaios"):
-        ok, msg = pop_result("ensaios")
-        if ok:
-            st.success(f"✓ {msg}")
+        if st.button("↺ Atualizar", key="ens_atualizar", use_container_width=True,
+                     help="Limpa o cache e busca dados atualizados da API"):
             st.cache_data.clear()
             st.rerun()
-        else:
-            if "SESSAO_EXPIRADA" in msg or "Sessão expirada" in msg:
-                st.warning(
-                    "⚠️ Sessão do Chrome expirada. Abra `baixar_ensaios.py` localmente "
-                    "para fazer login no AEVIAS CONTROLE e tente novamente."
-                )
-            else:
-                st.error(f"Falha na sincronização: {msg}")
-    if has_error("ensaios"):
-        st.error(f"Erro interno: {pop_error('ensaios')}")
 
-    if _IS_CLOUD:
-        st.info(
-            "ℹ️ App em cloud — sincronização via Playwright requer máquina local com Chrome. "
-            "Execute `_eco_aevias_worker.py` localmente e comite o `cache_certificados/ensaios_aevias.json`."
-        )
+    # ── Carga dos dados via API ────────────────────────────────────────────────
+    with st.spinner("Carregando dados da API Base44..."):
+        dados = _carregar_ensaios_api()
 
-    # ── Carga dos dados ────────────────────────────────────────────────────────
-    dados = _carregar_ensaios()
     if not dados:
-        st.warning("Nenhum dado encontrado. Execute a sincronização ou verifique o cache.")
-        st.code(f"Cache esperado em:\n  {_JSON_CACHE}\n\nOu desktop:\n  {_JSON_DESKTOP}")
+        # Fallback para JSON local/cache
+        dados = _carregar_ensaios()
+
+    if not dados:
+        st.warning("Nenhum dado encontrado. Verifique a conexão com a API Base44 ou o token.")
         return
 
     df = _df_ensaios(dados)
