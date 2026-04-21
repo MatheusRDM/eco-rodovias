@@ -168,6 +168,19 @@ def _data_b44(rec: dict) -> str:
         return str(raw)[:10]
 
 
+def _get_lab(rec: dict) -> str:
+    """Extrai nome do laboratorista de forma segura (created_by pode ser str ou dict)."""
+    nome = rec.get("laboratorista_name", "")
+    if nome:
+        return nome
+    cb = rec.get("created_by")
+    if isinstance(cb, dict):
+        return cb.get("full_name", "—")
+    if isinstance(cb, str):
+        return cb or "—"
+    return "—"
+
+
 def _normalizar_registro(entidade: str, rec: dict) -> dict:
     """Converte um registro Base44 para o formato esperado por _df_ensaios."""
     rec_id   = rec.get("id", "")
@@ -176,8 +189,8 @@ def _normalizar_registro(entidade: str, rec: dict) -> dict:
     return {
         "obra":       _ENTIDADE_OBRA.get(entidade, "Pavimento"),
         "tipo":       _ENTIDADE_TIPO.get(entidade, entidade),
-        "lab":        rec.get("laboratorista_name") or rec.get("created_by", {}).get("full_name", "—"),
-        "profissional": rec.get("laboratorista_name") or rec.get("created_by", {}).get("full_name", "—"),
+        "lab":        _get_lab(rec),
+        "profissional": _get_lab(rec),
         "data":       _data_b44(rec),
         "reportUrl":  report_url,
         "status":     _status_b44(rec),

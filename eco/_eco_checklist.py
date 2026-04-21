@@ -52,10 +52,12 @@ def _carregar_checklist_api() -> list[dict]:
             status = ("Reprovado" if r.get("was_rejected")
                       else "Aprovado" if r.get("approved")
                       else "Pendente")
+            cb = r.get("created_by")
+            lab = r.get("laboratorista_name") or (cb.get("full_name","—") if isinstance(cb,dict) else str(cb or "—"))
             resultado.append({
                 "tipo":               tipo_nome,
-                "lab":                r.get("laboratorista_name", "—"),
-                "profissional":       r.get("laboratorista_name", "—"),
+                "lab":                lab,
+                "profissional":       lab,
                 "data":               data_fmt,
                 "data_iso":           data_iso,
                 "status":             status,

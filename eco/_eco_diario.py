@@ -108,10 +108,12 @@ def _carregar_diarios() -> list:
             status = ("Reprovado" if r.get("was_rejected")
                       else "Aprovado" if r.get("approved")
                       else "Pendente")
+            cb = r.get("created_by")
+            lab = r.get("laboratorista_name") or (cb.get("full_name","—") if isinstance(cb,dict) else str(cb or "—"))
             result.append({
                 "tipo":        "Diário de Obra",
-                "profissional": r.get("laboratorista_name", "—"),
-                "lab":          r.get("laboratorista_name", "—"),
+                "profissional": lab,
+                "lab":          lab,
                 "data":         data_fmt,
                 "status":       status,
                 "reportUrl":    f"/diario-de-obra/{r.get('id','')}",
