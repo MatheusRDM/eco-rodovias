@@ -198,16 +198,48 @@ def _normalizar_registro(entidade: str, rec: dict) -> dict:
     }
 
 
+def _obra_nome_para_grupo(obra_name: str) -> str:
+    """Converte o nome da obra do Base44 para o grupo de frente de serviço."""
+    n = (obra_name or "").upper()
+    if "SST" in n or "SEGURANÇA" in n or "SEGURANCA" in n:
+        return "SST"
+    if "TOPOGRAFIA" in n or "TOPO" in n:
+        return "Topografia"
+    if "ESCRITÓRIO" in n or "ESCRITORIO" in n or "ESCRITOR" in n:
+        return "Escritório"
+    if "OAE" in n or "TERRAPLAN" in n or "SONDAGEM" in n:
+        return "OAE / Terraplenos"
+    if "CONSERVA" in n:
+        return "Conserva"
+    return "Pavimento"
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _carregar_mapa_obras() -> dict:
+    """Busca entidade Obra do Base44 e retorna mapa {obra_id: grupo}."""
+    try:
+        obras = _b44_listar("Obra")
+        return {o["id"]: _obra_nome_para_grupo(o.get("name", "")) for o in obras if o.get("id")}
+    except Exception:
+        return {}
+
+
 def _carregar_ensaios_api() -> list[dict]:
     """
     Busca todos os tipos de registro diretamente da API Base44.
-    Retorna lista normalizada no mesmo formato do scraper antigo.
+    Usa obra_id para categorizar corretamente em SST / Pavimento / Topografia / Escritório.
     """
+    mapa_obras = _carregar_mapa_obras()
     resultado = []
     for entidade in _ENTIDADE_TIPO.keys():
         registros = _b44_listar(entidade)
         for rec in registros:
-            resultado.append(_normalizar_registro(entidade, rec))
+            norm = _normalizar_registro(entidade, rec)
+            # Sobrescreve 'obra' com o grupo real baseado em obra_id
+            obra_id = rec.get("obra_id") or rec.get("project_id") or ""
+            if obra_id and obra_id in mapa_obras:
+                norm["obra"] = mapa_obras[obra_id]
+            resultado.append(norm)
     return resultado
 
 

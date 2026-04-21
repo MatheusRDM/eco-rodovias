@@ -128,7 +128,10 @@ def listar(entidade: str) -> list[dict]:
         data = resp.json()
         if not isinstance(data, list):
             return []
-        # Filtra apenas registros ECO Rodovias 6771
+        # Entidade Obra: retorna todas (usada para lookup de grupos)
+        if entidade == "Obra":
+            return data
+        # Demais: filtra apenas registros ECO Rodovias 6771
         return [r for r in data if _is_eco(r)]
     except requests.exceptions.Timeout:
         logger.warning(f"[Base44] Timeout ao buscar {entidade}")
