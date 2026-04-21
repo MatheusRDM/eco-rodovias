@@ -619,6 +619,131 @@ def _tabela_com_links(df: pd.DataFrame):
 
 
 # =============================================================================
+# VISUALIZAÇÃO: LISTA POR SERVIÇO → PESSOA → PDFS
+# =============================================================================
+
+_COR_GRUPO = {
+    "SST":              "#e6194b",
+    "Pavimento":        "#3cb44b",
+    "Topografia":       "#ffe119",
+    "OAE / Terraplenos":"#4363d8",
+    "Escritório":       "#911eb4",
+    "Conserva":         "#42d4f4",
+}
+
+_CSS_LISTA = """
+<style>
+.srv-grupo-hdr {
+    font-family:'Poppins',sans-serif; font-size:1.1rem; font-weight:700;
+    padding:10px 14px; border-radius:8px 8px 0 0; margin-top:18px; margin-bottom:0;
+    letter-spacing:.04em; text-transform:uppercase;
+}
+.srv-pessoa-blk {
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08);
+    border-radius:0 0 8px 8px; margin-bottom:14px; padding:10px 14px;
+}
+.srv-pessoa-nome {
+    font-family:'Poppins',sans-serif; font-size:.88rem; font-weight:600;
+    color:#E8EFD8; margin-bottom:6px;
+}
+.srv-pdf-link {
+    display:block; font-family:'Inter',sans-serif; font-size:.78rem;
+    padding:3px 0; text-decoration:none; border-bottom:1px solid rgba(255,255,255,.05);
+}
+.srv-pdf-link:last-child { border-bottom:none; }
+.srv-status-ok   { color:#3cb44b; }
+.srv-status-pend { color:#F7B731; }
+.srv-status-rep  { color:#e6194b; }
+.srv-badge {
+    display:inline-block; font-size:.65rem; padding:1px 6px;
+    border-radius:4px; margin-left:6px; vertical-align:middle; font-weight:600;
+}
+</style>
+"""
+
+
+def _render_lista_servico(df: "pd.DataFrame"):
+    """
+    Exibe PDFs organizados por:
+      SERVIÇO (SST / Pavimento / Topografia / Escritório)
+        └── PESSOA
+              └── Tipo — Data [link] [status]
+    """
+    col_lab = "lab" if "lab" in df.columns else "profissional"
+    df = df.copy()
+
+    def _obra_para_grupo(obra: str) -> str:
+        o = (obra or "").lower()
+        if "sst" in o or "segurança" in o: return "SST"
+        if "topo" in o: return "Topografia"
+        if "escrit" in o: return "Escritório"
+        if "oae" in o or "terraplan" in o: return "OAE / Terraplenos"
+        if "conserva" in o: return "Conserva"
+        return "Pavimento"
+
+    df["_grupo"] = df["obra"].fillna("").apply(_obra_para_grupo)
+
+    st.markdown(_CSS_LISTA, unsafe_allow_html=True)
+
+    ordem = ["SST", "Pavimento", "Topografia", "OAE / Terraplenos", "Escritório", "Conserva"]
+
+    for grupo in ordem:
+        df_g = df[df["_grupo"] == grupo]
+        if df_g.empty:
+            continue
+
+        cor = _COR_GRUPO.get(grupo, "#8FA882")
+        total_g = len(df_g)
+
+        st.markdown(
+            f'<div class="srv-grupo-hdr" style="background:{cor}22;color:{cor};'
+            f'border-left:4px solid {cor}">'
+            f'🏷️ {grupo} &nbsp;<span style="font-size:.75rem;font-weight:400;opacity:.7">'
+            f'({total_g} registros)</span></div>',
+            unsafe_allow_html=True,
+        )
+
+        pessoas = sorted(df_g[col_lab].dropna().unique())
+        html_blk = ['<div class="srv-pessoa-blk">']
+
+        for i, pessoa in enumerate(pessoas):
+            df_p = df_g[df_g[col_lab] == pessoa].sort_values("data_dt", ascending=False)
+            total_p = len(df_p)
+
+            if i > 0:
+                html_blk.append('<hr style="margin:10px 0;border:none;border-top:1px solid rgba(255,255,255,.07)">')
+
+            html_blk.append(
+                f'<div class="srv-pessoa-nome">👤 {pessoa}'
+                f'<span style="font-size:.72rem;color:#8FA882;font-weight:400;margin-left:8px">'
+                f'{total_p} registro{"s" if total_p != 1 else ""}</span></div>'
+            )
+
+            for _, row in df_p.iterrows():
+                data_lbl = str(row.get("data", ""))[:5]  # dd/mm
+                tipo     = row.get("tipo", "—")
+                status   = str(row.get("status", "")).lower()
+                url      = row.get("url_completa", "#") or "#"
+
+                if "aprovado" in status:
+                    st_cls, st_lbl = "srv-status-ok",   "✓ Aprovado"
+                elif "reprovado" in status:
+                    st_cls, st_lbl = "srv-status-rep",  "✗ Reprovado"
+                else:
+                    st_cls, st_lbl = "srv-status-pend", "⏳ Pendente"
+
+                html_blk.append(
+                    f'<a class="srv-pdf-link {st_cls}" href="{url}" target="_blank">'
+                    f'📄 {data_lbl} — {tipo}'
+                    f'<span class="srv-badge" style="background:{cor}22;color:{cor}">{st_lbl}</span>'
+                    f'</a>'
+                )
+
+        html_blk.append('</div>')
+        st.markdown("".join(html_blk), unsafe_allow_html=True)
+
+
+# =============================================================================
 # ENTRADA PRINCIPAL
 # =============================================================================
 
@@ -932,9 +1057,9 @@ def _aba_ensaios():
     # ── Cards de resumo ────────────────────────────────────────────────────────
     _cards_resumo(df, _mtime or "—")
 
-    # ── Por Frente de Servico ─────────────────────────────────────────────────
+    # ── Lista por Serviço → Pessoa → PDFs ────────────────────────────────────
     st.markdown("---")
-    _render_por_frente_servico(df)
+    _render_lista_servico(df)
 
     # ── Exportar Todos ────────────────────────────────────────────────────────
     st.markdown("---")
