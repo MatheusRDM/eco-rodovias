@@ -867,12 +867,17 @@ def _aba_ensaios():
             st.rerun()
 
     # ── Carga dos dados via API ────────────────────────────────────────────────
+    _mtime = None
     with st.spinner("Carregando dados da API Base44..."):
         dados = _carregar_ensaios_api()
+        if dados:
+            _mtime = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     if not dados:
         # Fallback para JSON local/cache
         dados = _carregar_ensaios()
+        if dados:
+            _mtime = "cache local"
 
     if not dados:
         st.warning("Nenhum dado encontrado. Verifique a conexão com a API Base44 ou o token.")
