@@ -24,6 +24,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+# Detecta se está no Streamlit Cloud (sem drive local)
+_GDRIVE_PROBE = r"G:\.shortcut-targets-by-id\1NUJ7pNAqedohSrLjiwFErFrtVqVZkrjk"
+_IS_CLOUD = not os.path.isdir(_GDRIVE_PROBE)
+
 # =============================================================================
 # CONSTANTES
 # =============================================================================
@@ -331,8 +335,12 @@ def _aba_abastecimento():
     with c2:
         d_fim = st.date_input("Até", value=hoje, key="gm_dfim")
     with c3:
-        sincronizar = st.button("🔄 Sincronizar", key="gm_sync", use_container_width=True,
-                                help="Busca dados atualizados do GoodManager via Chrome")
+        sync_disabled = _IS_CLOUD
+        sincronizar = st.button(
+            "🔄 Sincronizar", key="gm_sync", use_container_width=True,
+            disabled=sync_disabled,
+            help="Disponível apenas em modo local (requer Chrome com perfil GoodManager)" if sync_disabled
+                 else "Busca dados atualizados do GoodManager via Chrome")
     with c4:
         cache_ts = ""
         if _CACHE_JSON.exists():
@@ -343,8 +351,17 @@ def _aba_abastecimento():
                 f"<span style='font-size:0.75rem;color:#8FA882'>Cache: {cache_ts}</span>",
                 unsafe_allow_html=True)
 
-    # ── Sincronização ──────────────────────────────────────────────────────────
-    if sincronizar:
+    # ── Aviso cloud ────────────────────────────────────────────────────────────
+    if _IS_CLOUD:
+        st.info(
+            "🌐 **Modo cloud:** a sincronização com GoodManager requer o Chrome local com sessão salva.\n\n"
+            "Para atualizar os dados: execute o worker no computador local e faça commit do arquivo "
+            "`cache_certificados/abastecimento_cache.json`.",
+            icon="ℹ️"
+        )
+
+    # ── Sincronização (local apenas) ───────────────────────────────────────────
+    if sincronizar and not _IS_CLOUD:
         with st.spinner("Conectando ao GoodManager via Chrome..."):
             ok, msg = _sincronizar(
                 d_ini.strftime("%d/%m/%Y"),
