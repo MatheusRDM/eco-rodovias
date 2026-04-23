@@ -143,9 +143,20 @@ def _tentar_auto_login() -> bool:
 
 def verificar_login(usuario, senha):
     """Verifica se o usuário e senha estão corretos"""
-    usuarios = _get_usuarios()
-    if usuario in usuarios and usuarios[usuario]["senha"] == senha:
+    # Credenciais base — sempre funcionam independente de secrets
+    _BASE = {"Eco": "Afirmaevias", "Dev": "Afirmaevias"}
+    if usuario in _BASE and _BASE[usuario] == senha:
         return True
+    # Credenciais adicionais via secrets (usuários extras)
+    try:
+        usuarios = _get_usuarios()
+        u = usuarios.get(usuario)
+        if u is not None:
+            senha_cfg = u.get("senha") if hasattr(u, "get") else u["senha"]
+            if str(senha_cfg) == senha:
+                return True
+    except Exception:
+        pass
     return False
 
 def get_paginas_permitidas(usuario):
