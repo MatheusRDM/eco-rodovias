@@ -15,9 +15,26 @@ Saída stdout:
     SESSAO_EXPIRADA → precisa logar novamente no Chrome
     ERRO:<msg>  → falha geral (ver stderr)
 """
-import sys, os, json, re
+import sys, os, json, re, subprocess
 from pathlib import Path
 from datetime import datetime
+
+# Auto-instala Chromium se necessário (Streamlit Cloud não tem navegador por padrão)
+def _ensure_chromium():
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            # Testa se consegue lançar — se falhar, instala
+            browser = p.chromium.launch(headless=True,
+                                        args=["--no-sandbox"])
+            browser.close()
+    except Exception as e:
+        if "playwright install" in str(e).lower() or "executable doesn't exist" in str(e).lower() or "not found" in str(e).lower():
+            print("[worker] Instalando Chromium...", file=sys.stderr, flush=True)
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"],
+                           capture_output=False, timeout=120)
+
+_ensure_chromium()
 
 # ── Params ────────────────────────────────────────────────────────────────────
 args       = sys.argv[1:]

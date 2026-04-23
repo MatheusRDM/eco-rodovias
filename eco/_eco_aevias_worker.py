@@ -19,8 +19,25 @@ Saída stderr:
 import sys
 import os
 import json
+import subprocess
 from datetime import datetime
 from pathlib import Path
+
+
+def _ensure_chromium():
+    """Auto-instala Chromium do Playwright se não encontrar o binário."""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch(headless=True, args=["--no-sandbox"])
+            b.close()
+    except Exception as e:
+        if any(kw in str(e).lower() for kw in ("playwright install", "executable", "not found")):
+            print("[worker] Instalando Chromium...", file=sys.stderr, flush=True)
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"],
+                           timeout=120)
+
+_ensure_chromium()
 
 # Perfil Chrome compartilhado com o Selenium (baixar_ensaios.py)
 _DESKTOP = Path(os.path.expanduser("~")) / "OneDrive" / "Área de Trabalho"
