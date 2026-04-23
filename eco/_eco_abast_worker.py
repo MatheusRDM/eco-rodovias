@@ -151,9 +151,9 @@ def main():
         _log("Iniciando browser com perfil persistente...")
         ctx = p.chromium.launch_persistent_context(
             str(_PROFILE),
-            channel="chrome",
             headless=True,
-            args=["--no-sandbox", "--disable-gpu", "--disable-extensions"],
+            args=["--no-sandbox", "--disable-gpu", "--disable-extensions",
+                  "--disable-dev-shm-usage"],
         )
         page = ctx.new_page()
 

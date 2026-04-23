@@ -133,7 +133,6 @@ def raspar_aevias(output_path: str, data_ini: str = "", data_fim: str = "") -> i
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
             user_data_dir=str(_PROFILE_DIR),
-            channel="chrome",
             headless=True,
             args=["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage"],
         )
