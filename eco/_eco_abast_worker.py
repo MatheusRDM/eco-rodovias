@@ -31,8 +31,8 @@ def _ensure_chromium():
     except Exception as e:
         if "playwright install" in str(e).lower() or "executable doesn't exist" in str(e).lower() or "not found" in str(e).lower():
             print("[worker] Instalando Chromium...", file=sys.stderr, flush=True)
-            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"],
-                           capture_output=False, timeout=120)
+            subprocess.run([sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"],
+                           capture_output=False, timeout=180)
 
 _ensure_chromium()
 
