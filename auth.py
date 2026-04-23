@@ -10,8 +10,9 @@ import time
 import streamlit as st
 from cloud_config import get_usuarios, get_logo_path
 
-# Usuários e senhas — carregados dinamicamente
-USUARIOS = get_usuarios()
+# Usuários e senhas — carregados dinamicamente (lazy, para secrets estarem disponíveis)
+def _get_usuarios():
+    return get_usuarios()
 
 # Mapeamento de páginas para arquivos
 PAGINA_ARQUIVO = {
@@ -50,7 +51,7 @@ def _validar_token(token: str) -> str | None:
         ).hexdigest()[:24]
         if not hmac.compare_digest(sig, expected):
             return None
-        if usuario not in USUARIOS:
+        if usuario not in _get_usuarios():
             return None
         return usuario
     except Exception:
@@ -142,14 +143,16 @@ def _tentar_auto_login() -> bool:
 
 def verificar_login(usuario, senha):
     """Verifica se o usuário e senha estão corretos"""
-    if usuario in USUARIOS and USUARIOS[usuario]["senha"] == senha:
+    usuarios = _get_usuarios()
+    if usuario in usuarios and usuarios[usuario]["senha"] == senha:
         return True
     return False
 
 def get_paginas_permitidas(usuario):
     """Retorna a lista de páginas permitidas para o usuário"""
-    if usuario in USUARIOS:
-        return USUARIOS[usuario]["paginas"]
+    usuarios = _get_usuarios()
+    if usuario in usuarios:
+        return usuarios[usuario]["paginas"]
     return []
 
 def tem_acesso_pagina(usuario, pagina):
