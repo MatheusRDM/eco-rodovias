@@ -131,6 +131,7 @@ from _eco_rastreamento import _aba_rastreamento
 from _eco_resumo import _aba_resumo
 from _eco_diario import _aba_diario
 from _eco_espelho_ponto import _aba_espelho_ponto, _salvar_cache, _processar_dados
+from _eco_abastecimento import _aba_abastecimento
 from _eco_bg_loader import is_loading, has_result, has_error, pop_result, pop_error
 
 
@@ -283,13 +284,14 @@ def main():
         <p>BR-050 (Eco Minas Goiás) · BR-365 (Eco Cerrado) · Supervisão de Obras AFIRMA E-VIAS</p>
     </div>""", unsafe_allow_html=True)
 
-    tab_resumo, tab_checklist, tab_diario, tab_ensaios, tab_rastr, tab_ponto = st.tabs([
+    tab_resumo, tab_checklist, tab_diario, tab_ensaios, tab_rastr, tab_ponto, tab_abast = st.tabs([
         "Resumo",
         "Checklist",
         "Diario de Obra",
         "Ensaios",
         "Rastreamento",
         "Espelho Ponto",
+        "⛽ Abastecimento",
     ])
 
     with tab_resumo:    _aba_resumo()
@@ -298,6 +300,7 @@ def main():
     with tab_ensaios:   _aba_ensaios()
     with tab_rastr:     _aba_rastreamento()
     with tab_ponto:     _aba_espelho_ponto()
+    with tab_abast:     _aba_abastecimento()
 
 
 if __name__ == "__main__" or True:
