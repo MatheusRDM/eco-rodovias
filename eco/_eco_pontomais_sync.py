@@ -53,6 +53,7 @@ def _login(login: str, senha: str) -> dict:
                 "token":     data["token"],
                 "client_id": data["client_id"],
                 "uid":       data["data"]["login"],
+                "uuid":      data.get("uuid", ""),
             }
         except RuntimeError:
             raise
@@ -64,38 +65,48 @@ def _login(login: str, senha: str) -> dict:
 
 
 def _headers(auth: dict) -> dict:
-    return {
+    h = {
         **_BROWSER_HEADERS,
         "Referer":      "https://app2.pontomais.com.br/relatorios",
         "api-version":  "2",
         "access-token": auth["token"],
-        "client":       auth["client_id"],   # "client", não "client_id"
+        "client":       auth["client_id"],
         "uid":          auth["uid"],
         "token":        auth["token"],
     }
+    if auth.get("uuid"):
+        h["uuid"] = auth["uuid"]
+    return h
 
 
 # ─── Geração + download ────────────────────────────────────────────────────────
 
+_ECO_TEAM_ID    = 1491658
+_ECO_TEAM_VALUE = "ECO050 Concessionária de Rodovias S.A"
+
+
 def _gerar_relatorio(auth: dict, start_date: str, end_date: str) -> bytes:
     """
-    Solicita o relatório Jornada (espelho ponto) em XLSX.
-    Retorna os bytes do arquivo Excel.
+    Solicita o relatório Jornada (espelho ponto) em HTML via API PontoMais.
+    Retorna os bytes brutos do HTML gerado no S3.
     start_date / end_date: 'YYYY-MM-DD'
     """
     payload = {
         "report": {
-            "report_id":             "work_days",
-            "start_date":            start_date,
-            "end_date":              end_date,
-            "columns":               "overnight_time,date,motive,justification,time_cards,time_balance,summary,extra_time",
-            "row_filters":           "",
+            "report_id":              "work_days",
+            "start_date":             start_date,
+            "end_date":               end_date,
+            "columns":                "overnight_time,date,motive,time_cards,time_balance,summary,extra_time",
+            "row_filters":            "",
             "additional_row_filters": "",
-            "proposal_status":       "",
-            "format":                "xlsx",
-            "fabrication_number":    "",
-            "initial_nsr":           "",
-            "group_columns":         "",
+            "proposal_status":        "",
+            "format":                 "html",
+            "fabrication_number":     "",
+            "initial_nsr":            "",
+            "group_columns":          "",
+            "team_id":                _ECO_TEAM_ID,
+            "filter_by":              "team_id",
+            "filter_value":           _ECO_TEAM_VALUE,
         }
     }
     import time
@@ -106,7 +117,7 @@ def _gerar_relatorio(auth: dict, start_date: str, end_date: str) -> bytes:
                 f"{_API_BASE}/api/html_reports/work_days",
                 json=payload,
                 headers=_headers(auth),
-                timeout=(10, 180),   # geração leva ~60s localmente; 180s para Cloud Run
+                timeout=(10, 180),
             )
             if r.status_code != 200:
                 raise RuntimeError(
@@ -117,7 +128,7 @@ def _gerar_relatorio(auth: dict, start_date: str, end_date: str) -> bytes:
             if not url:
                 raise RuntimeError(f"API não retornou URL do arquivo: {resp}")
 
-            # Download direto do S3 (sem autenticação)
+            # Download direto do S3
             dl = requests.get(url, timeout=(10, 120))
             if dl.status_code != 200:
                 raise RuntimeError(f"Falha ao baixar arquivo S3 (HTTP {dl.status_code})")

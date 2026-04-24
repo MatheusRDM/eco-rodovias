@@ -131,7 +131,108 @@ _CSS = """
 </script>
 """
 
-# ─── Parser de blocos ─────────────────────────────────────────────────────────
+# ─── Parser HTML (resposta API PontoMais) ────────────────────────────────────
+
+def _parse_html_report(raw_bytes: bytes) -> pd.DataFrame:
+    """
+    Lê o HTML do relatório Jornada (espelho ponto) gerado pela API PontoMais.
+    Estrutura: div.report-group-name → "Colaborador: Nome" seguido de <table>.
+    Retorna DataFrame no mesmo formato de _parse_blocos.
+    """
+    import re as _re
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(raw_bytes, "html.parser")
+    except ImportError:
+        # Fallback: usa html.parser nativo via pandas
+        import io as _io
+        try:
+            tables = pd.read_html(_io.BytesIO(raw_bytes))
+        except Exception:
+            return pd.DataFrame()
+        return pd.DataFrame()  # sem nome não conseguimos associar
+
+    # Mapa: posição da coluna → campo normalizado
+    _COL_MAP = {
+        "data":              "data",
+        "1ª entrada":        "entrada",
+        "1ª saída":          "saida_almoco",
+        "2ª entrada":        "volta_almoco",
+        "2ª saída":          "saida",
+        "h. intervalo":      "intervalo",
+        "horas normais":     "ht",
+        "h.e. 1":            "he_50",
+        "h.e. 2":            "he_100",
+        "motivo":            "motivo",
+        "motivo/observação": "motivo",
+    }
+
+    def _clean_time(v: str) -> str:
+        """Remove sufixos como 'p' (pré-assinalado) e normaliza HH:MM."""
+        v = v.strip().rstrip("p").rstrip("P").strip()
+        if _re.match(r"^\d{1,2}:\d{2}$", v) and v != "00:00":
+            return v
+        return ""
+
+    rows = []
+    # Cada bloco de colaborador: div.report-group-name seguido por table
+    for name_div in soup.find_all("div", class_="report-group-name"):
+        raw_name = name_div.get_text(" ", strip=True)
+        nome = _re.sub(r"(?i)colaborador\s*:\s*", "", raw_name).strip()
+        if not nome:
+            continue
+
+        # Primeira tabela após o div de nome
+        table = name_div.find_next("table")
+        if not table:
+            continue
+
+        # Detecta índices de colunas a partir dos <th>
+        col_idx = {}
+        for th in table.find_all("th"):
+            label = th.get_text(" ", strip=True).lower()
+            for key, field in _COL_MAP.items():
+                if key in label and field not in col_idx.values():
+                    col_idx[th.parent.find_all("th").index(th) if th.parent else -1] = field
+                    break
+
+        # Linhas de dados
+        for tr in table.find_all("tr"):
+            tds = tr.find_all("td")
+            if len(tds) < 6:
+                continue
+            cells = [td.get_text(" ", strip=True) for td in tds]
+
+            # Data: "Seg, 20/04/2026" → extrai "20/04/2026"
+            raw_data = cells[0] if cells else ""
+            m = _re.search(r"(\d{2}/\d{2}/\d{4})", raw_data)
+            if not m:
+                continue
+            data_str = m.group(1)
+
+            rec = {"nome": nome, "data": data_str}
+            for idx, field in col_idx.items():
+                if field == "data" or idx < 0 or idx >= len(cells):
+                    continue
+                v = cells[idx]
+                if field in ("entrada", "saida_almoco", "volta_almoco", "saida", "intervalo", "ht", "he_50", "he_100"):
+                    rec[field] = _clean_time(v)
+                else:
+                    rec[field] = v
+            rows.append(rec)
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    # Garante colunas mínimas
+    for col in ("entrada", "saida_almoco", "volta_almoco", "saida", "intervalo", "ht", "he_50", "he_100", "motivo", "justificativa_he"):
+        if col not in df.columns:
+            df[col] = ""
+    return df
+
+
+# ─── Parser de blocos (XLSX upload manual) ───────────────────────────────────
 
 def _col_match(name: str, keywords: list) -> bool:
     n = name.lower()
@@ -407,8 +508,9 @@ def _carregar_cache() -> tuple:
 
 @st.cache_data(ttl=3600)
 def _processar_dados(raw_bytes: bytes) -> pd.DataFrame:
-    """Parse + enrich em cache Streamlit."""
-    df = _parse_blocos(raw_bytes)
+    """Parse + enrich em cache Streamlit. Detecta HTML vs XLSX automaticamente."""
+    is_html = raw_bytes[:100].lstrip().startswith(b"<!") or b"<html" in raw_bytes[:200].lower()
+    df = _parse_html_report(raw_bytes) if is_html else _parse_blocos(raw_bytes)
     if df.empty:
         return df
     return _enrich_grupos(df)
