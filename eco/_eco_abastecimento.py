@@ -126,6 +126,11 @@ def _carregar_cache(data_ini: datetime, data_fim: datetime) -> pd.DataFrame:
             dados = json.load(f)
         if not dados:
             return pd.DataFrame()
+        # Suporta tanto lista plana quanto dict com chave "transacoes"
+        if isinstance(dados, dict):
+            dados = dados.get("transacoes", dados.get("data", []))
+        if not dados:
+            return pd.DataFrame()
         df = pd.DataFrame(dados)
         df = _normalizar(df)
 
@@ -146,17 +151,17 @@ def _carregar_cache(data_ini: datetime, data_fim: datetime) -> pd.DataFrame:
 # =============================================================================
 
 _MAPA_COLUNAS = {
-    "data":           ["data", "dt", "data transação", "data/hora", "data da transação"],
+    "data":           ["data transacao", "data", "dt", "data transação", "data/hora", "data da transação"],
     "hora":           ["hora", "horário", "horario"],
     "placa":          ["placa", "veículo", "veiculo"],
-    "motorista":      ["motorista", "condutor"],
-    "produto":        ["produto", "combustivel", "combustível", "tipo combustível"],
+    "motorista":      ["nome motorista", "motorista", "condutor"],
+    "produto":        ["tipo combustivel", "produto", "combustivel", "combustível", "tipo combustível"],
     "litros":         ["litros", "quantidade", "qtde", "volume"],
-    "valor_unitario": ["preço unit", "preço unitário", "vlr unit", "p.unit"],
-    "valor_total":    ["valor", "valor total", "vlr total", "total", "valor (r$)"],
-    "posto":          ["posto", "estabelecimento", "local"],
-    "km":             ["km", "hodômetro", "hodometro", "quilometragem"],
-    "km_percorrido":  ["km percorrido", "km rodados"],
+    "valor_unitario": ["vl/litro", "preço unit", "preço unitário", "vlr unit", "p.unit"],
+    "valor_total":    ["valor emissao", "valor", "valor total", "vlr total", "total", "valor (r$)"],
+    "posto":          ["nome estabelecimento", "posto", "estabelecimento", "local"],
+    "km":             ["hodometro ou horimetro", "km", "hodômetro", "hodometro", "quilometragem"],
+    "km_percorrido":  ["km rodados ou horas trabalhadas", "km percorrido", "km rodados"],
 }
 
 
@@ -335,11 +340,10 @@ def _aba_abastecimento():
     with c2:
         d_fim = st.date_input("Até", value=hoje, key="gm_dfim")
     with c3:
-        sync_disabled = _IS_CLOUD
         sincronizar = st.button(
             "🔄 Sincronizar", key="gm_sync", use_container_width=True,
-            disabled=sync_disabled,
-            help="Disponível apenas em modo local (requer Chrome com perfil GoodManager)" if sync_disabled
+            disabled=_IS_CLOUD,
+            help="Disponível apenas em modo local (requer Chrome com perfil GoodManager)" if _IS_CLOUD
                  else "Busca dados atualizados do GoodManager via Chrome")
     with c4:
         cache_ts = ""
@@ -350,15 +354,6 @@ def _aba_abastecimento():
             st.markdown(
                 f"<span style='font-size:0.75rem;color:#8FA882'>Cache: {cache_ts}</span>",
                 unsafe_allow_html=True)
-
-    # ── Aviso cloud ────────────────────────────────────────────────────────────
-    if _IS_CLOUD:
-        st.info(
-            "🌐 **Modo cloud:** a sincronização com GoodManager requer o Chrome local com sessão salva.\n\n"
-            "Para atualizar os dados: execute o worker no computador local e faça commit do arquivo "
-            "`cache_certificados/abastecimento_cache.json`.",
-            icon="ℹ️"
-        )
 
     # ── Sincronização (local apenas) ───────────────────────────────────────────
     if sincronizar and not _IS_CLOUD:
@@ -390,14 +385,7 @@ def _aba_abastecimento():
     )
 
     if df.empty:
-        if not _CACHE_JSON.exists():
-            st.info(
-                "Nenhum dado em cache.\n\n"
-                "Clique em **🔄 Sincronizar** para buscar os abastecimentos do GoodManager.\n\n"
-                "O processo abre o Chrome em segundo plano e pode levar ~30 segundos."
-            )
-        else:
-            st.info("Nenhuma transação no período selecionado.")
+        st.info("Nenhuma transação no período selecionado.")
         return
 
     # ── KPIs ──────────────────────────────────────────────────────────────────
