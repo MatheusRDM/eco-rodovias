@@ -183,15 +183,18 @@ def _normalizar(df: pd.DataFrame) -> pd.DataFrame:
     elif "data" in df.columns:
         df["data_hora"] = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
 
-    # Numéricos
+    # Numéricos — se já forem float/int, converte direto; se forem string BR (1.234,56), normaliza
     for col in ["litros", "valor_total", "valor_unitario", "km", "km_percorrido"]:
         if col in df.columns:
-            df[col] = (df[col].astype(str)
-                       .str.replace(r"R\$\s*", "", regex=True)
-                       .str.replace(".", "", regex=False)
-                       .str.replace(",", ".", regex=False)
-                       .str.strip())
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            if pd.api.types.is_numeric_dtype(df[col]):
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            else:
+                df[col] = (df[col].astype(str)
+                           .str.replace(r"R\$\s*", "", regex=True)
+                           .str.replace(r"\.", "", regex=True)   # milhar: 1.234 → 1234
+                           .str.replace(",", ".", regex=False)   # decimal: 1234,56 → 1234.56
+                           .str.strip())
+                df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df
 
