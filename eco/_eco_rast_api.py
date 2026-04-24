@@ -69,7 +69,7 @@ def _logos_login():
         usuario = st.secrets["logos_usuario"]
         senha   = st.secrets["logos_senha"]
     except Exception:
-        usuario = "matheus.resende@afirmaevias.com.br"
+        usuario = "matheus.resende@afirmaevias.com"
         senha   = "19072019Joaquim*"
 
     sess = requests.Session()
@@ -91,6 +91,9 @@ def _logos_login():
             }, timeout=20, allow_redirects=True)
             
             idcli = next((c.value for c in sess.cookies if c.name == "IDCLI"), None)
+            if not idcli:
+                # Fallback: idcliente fixo da conta Afirma E-vias
+                idcli = "4851"
             if idcli:
                 return sess, idcli
             
@@ -242,7 +245,10 @@ def _parse_eco(v, i):
         sugest = _d.fromisoformat(dt) if dt else date.today()
     except Exception:
         sugest = date.today()
-    return {
+
+    placa = (v.get("placavel") or "").replace("-", "").upper()
+
+    eco = {
         "contrato":       contrato,
         "motorista":      motorista,
         "desc":           desc,
@@ -263,4 +269,23 @@ def _parse_eco(v, i):
         "lon":            v.get("pos_coordenada_longitude"),
         "idvei":          v.get("pos_idvei"),
         "cor":            _CORES_VEICULOS[i % len(_CORES_VEICULOS)],
+        # Campos enriquecidos (preenchidos abaixo)
+        "concessao":      "",
+        "concessao_label": "",
+        "concessao_cor":  "",
+        "colaborador_nome": motorista,
+        "n_folha":        0,
+        "grupo":          "",
+        "cargo":          "",
     }
+
+    # Enriquece com dados do cadastro de colaboradores
+    try:
+        from _eco_colaboradores import enriquecer_logos_veiculo
+        eco["idvei"] = v.get("pos_idvei")  # garante campo para lookup
+        eco["placavel"] = placa
+        eco = enriquecer_logos_veiculo({**eco, "pos_idvei": v.get("pos_idvei"), "placavel": placa})
+    except Exception:
+        pass
+
+    return eco
