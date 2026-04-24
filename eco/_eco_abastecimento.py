@@ -342,9 +342,7 @@ def _aba_abastecimento():
     with c3:
         sincronizar = st.button(
             "🔄 Sincronizar", key="gm_sync", use_container_width=True,
-            disabled=_IS_CLOUD,
-            help="Disponível apenas em modo local (requer Chrome com perfil GoodManager)" if _IS_CLOUD
-                 else "Busca dados atualizados do GoodManager via Chrome")
+            disabled=_IS_CLOUD)
     with c4:
         cache_ts = ""
         if _CACHE_JSON.exists():
