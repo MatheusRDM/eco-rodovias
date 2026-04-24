@@ -1718,23 +1718,11 @@ def _aba_espelho_ponto():
         _iniciar_sync()
         st.rerun()
 
-    # Consome resultado do background task (se já terminou)
-    from _eco_bg_loader import has_result, pop_result, has_error, pop_error, is_loading
-    if has_result("espelho_ponto"):
-        raw_bytes = pop_result("espelho_ponto")
-        if raw_bytes:
-            _salvar_cache(raw_bytes)
-            st.session_state["ep_raw_bytes"] = raw_bytes
-            st.session_state["ep_ts"]        = date.today().isoformat()
-            _processar_dados.clear()
-    if has_error("espelho_ponto"):
-        err = pop_error("espelho_ponto")
-        st.warning(f"Falha na sincronização PontoMais: {err}")
-
-    # Polling enquanto carrega em segundo plano
+    # Mostra spinner enquanto bg task roda (poller em app.py consome o resultado)
+    from _eco_bg_loader import is_loading
     if is_loading("espelho_ponto"):
         st.info("⏳ Buscando dados do PontoMais… aguarde (pode levar até 2 min)")
-        import time as _time; _time.sleep(3); st.rerun()
+        return
 
     # Carrega dados
     df, ts = _carregar_dados()
