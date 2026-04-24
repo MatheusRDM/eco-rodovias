@@ -554,12 +554,12 @@ def _iniciar_sync():
     """Inicia a sincronização com PontoMais em segundo plano."""
     try:
         login = st.secrets.get("pontomais_login", "37895496816")
-        senha = st.secrets.get("pontomais_senha", "")
+        senha = st.secrets.get("pontomais_senha", "Afirma@03")
     except Exception:
-        login, senha = "37895496816", ""
+        login, senha = "37895496816", "Afirma@03"
 
     if not senha:
-        st.error("Senha do PontoMais não configurada em secrets.toml.")
+        st.error("Senha do PontoMais não configurada.")
         return
 
     hoje = date.today()
@@ -1717,6 +1717,24 @@ def _aba_espelho_ponto():
         st.session_state.pop("ep_auto_sync_tried", None)
         _iniciar_sync()
         st.rerun()
+
+    # Consome resultado do background task (se já terminou)
+    from _eco_bg_loader import has_result, pop_result, has_error, pop_error, is_loading
+    if has_result("espelho_ponto"):
+        raw_bytes = pop_result("espelho_ponto")
+        if raw_bytes:
+            _salvar_cache(raw_bytes)
+            st.session_state["ep_raw_bytes"] = raw_bytes
+            st.session_state["ep_ts"]        = date.today().isoformat()
+            _processar_dados.clear()
+    if has_error("espelho_ponto"):
+        err = pop_error("espelho_ponto")
+        st.warning(f"Falha na sincronização PontoMais: {err}")
+
+    # Polling enquanto carrega em segundo plano
+    if is_loading("espelho_ponto"):
+        st.info("⏳ Buscando dados do PontoMais… aguarde (pode levar até 2 min)")
+        import time as _time; _time.sleep(3); st.rerun()
 
     # Carrega dados
     df, ts = _carregar_dados()
